@@ -1,0 +1,56 @@
+#:schema https://supabase.com/schemas/config/v1.json
+# Local development configuration. Remote SQL changes go through migrations.
+# No hosted project link, password, token, or application secrets are stored here.
+project_id = "english-vocabulary-habit"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 17
+
+[db.migrations]
+enabled = true
+schema_paths = []
+
+[db.seed]
+enabled = false
+sql_paths = []
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["http://127.0.0.1:3000"]
+enable_signup = false
+enable_anonymous_sign_ins = false
+enable_refresh_token_rotation = true
+minimum_password_length = 8
+
+[auth.email]
+enabled = true
+enable_confirmations = true
+
+[studio]
+enabled = true
+port = 54323
+
+[realtime]
+enabled = false
+
+[storage]
+enabled = false
+
+[local_smtp]
+enabled = false
+
+[analytics]
+enabled = false
+
+[edge_runtime]
+enabled = false

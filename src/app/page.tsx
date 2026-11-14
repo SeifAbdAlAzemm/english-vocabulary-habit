@@ -1,69 +1,16 @@
-import Image from "next/image";
+import Link from "next/link";
+import { Shell } from "@/components/shell";
+import { StartSession } from "@/components/start-session";
+import { requireLearner } from "@/lib/supabase/server";
 
-export default function Home() {
-  return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
-  );
+export default async function Home() {
+  const { supabase, user } = await requireLearner();
+  const { data: draft, error } = await supabase.from("study_sessions").select("id").eq("user_id", user.id).eq("status", "draft").maybeSingle();
+  return <Shell active="home">
+    <div className="page-heading"><div><span className="eyebrow">YOUR DAILY PRACTICE</span><h1>Small steps.<br className="mobile-break" /> Lasting progress.</h1><p className="muted">Build the habit. Learn words you can actually use.</p></div><span className="pill">14-day pilot</span></div>
+    <div className="dashboard-grid"><section className="card hero-card"><div className="hero-top"><span className="eyebrow">A PLAN YOU CAN COME BACK TO</span><span className="sun-icon" aria-hidden="true">✳</span></div><h2>Two words.<br />A little more confidence.</h2><p>New words on Sunday–Thursday. Review on Friday and Saturday, with due reviews on every day.</p><div className="plan-numbers"><div><strong>2<small> words / day</small></strong><span>Sunday–Thursday</span></div><div><strong>20<small> new words</small></strong><span>Planned across 14 days</span></div></div><StartSession resume={Boolean(draft)} /><p className="fine-print">Flexible active time. No countdown. {draft ? "Your unfinished session is waiting." : "Begin with analysis, then approach."}</p>{error && <p role="alert" className="error-message">Database setup is needed. Apply the slice 01 migration before starting.</p>}</section>
+    <aside className="stack"><section className="card"><span className="eyebrow">TWO DIFFERENT GOALS</span><div className="goal"><span className="goal-icon">↻</span><div><h3>Build a daily habit</h3><p>Do genuine learning or retrieval practice, even on a busy day. Opening the app alone doesn’t count.</p></div></div><div className="goal"><span className="goal-icon">✧</span><div><h3>Make the words yours</h3><p>Understand, remember later, and use each word independently. Coverage is different from mastery.</p></div></div></section><Link href="/words" className="card shortcut"><span><span className="eyebrow">YOUR PERSONAL COLLECTION</span><h3>My Words</h3><p>Revisit your words and original sentences.</p></span><span aria-hidden="true">↗</span></Link></aside></div>
+    <section className="section"><div className="section-heading"><h2>A simple daily rhythm</h2><span className="muted">Learn → Use → Remember</span></div><div className="rhythm-grid">{[["01", "Retrieve first", "Try due words from memory before revealing the answers."], ["02", "Understand & produce", "Explore meaning, pronunciation and an example. Hide them, then write your own sentence."], ["03", "Reflect & return", "Get hints, self-correct and try quick recall. Return for spaced reviews."]].map(([n, title, text]) => <article className="card rhythm-card" key={n}><span className="step-number">{n}</span><h3>{title}</h3><p>{text}</p></article>)}</div></section>
+    <div className="bottom-grid"><section className="card mvd-card"><span className="eyebrow">A BUSY DAY STILL HAS ROOM</span><h3>The Minimum Viable Day</h3><p>Around five minutes is a guide, not a timer. Test two due words (or all if fewer); with no due words, test two old words or one plus a new sentence. On your first day, learn one word with a meaning, example, and personal sentence.</p><span className="pill neutral">MVD workflow · Coming soon</span></section><section className="card"><span className="eyebrow">WHAT’S AVAILABLE NOW</span><h3>Your first words, safely saved.</h3><p>Use a draft stopwatch, enter words manually, and keep your first sentences in My Words. Drafts do not count as completed sessions.</p><p className="fine-print">Due reviews: not available yet. Feedback, review scheduling, progress, exports, and Parking Lot are coming soon.</p></section></div>
+  </Shell>;
 }
