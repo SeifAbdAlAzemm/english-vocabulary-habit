@@ -125,6 +125,9 @@ dl { margin-top: 20px; font-size: 13px; }
 dt { color: var(--foreground); font-size: 11px; font-weight: 650; margin-top: 16px; }
 dd { margin-top: 5px; margin-left: 0; color: var(--muted); overflow-wrap: anywhere; }
 .empty-state { text-align: center; padding: 70px 30px; }
+.review-panel { padding-bottom: 24px; margin-bottom: 24px; border-bottom: 1px solid #d4dfc8; }
+.review-decisions { display: flex; flex-wrap: wrap; gap: 12px; }
+.review-queue { padding-left: 20px; display: grid; gap: 12px; overflow-wrap: anywhere; }
 .empty-state p { max-width: 440px; margin: 15px auto 25px; }
 .empty-icon { display: block; color: #789b56; font-size: 60px; }
 .login-page { min-height: 100vh; display: grid; grid-template-columns: 1fr 1fr; }

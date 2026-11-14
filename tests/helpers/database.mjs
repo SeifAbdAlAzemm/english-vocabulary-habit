@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 
 export const learnerA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -15,7 +15,9 @@ export const identitySchema = `
   grant execute on function auth.uid() to anon, authenticated;
 `;
 export async function migrationSql() {
-  return readFile(new URL("../../supabase/migrations/20261114000100_vertical_slice_01.sql", import.meta.url), "utf8");
+  const dir = new URL("../../supabase/migrations/", import.meta.url);
+  const files = (await readdir(dir)).filter(name => name.endsWith(".sql")).sort();
+  return (await Promise.all(files.map(name => readFile(new URL(name, dir), "utf8")))).join("\n");
 }
 export function word(target = "analysis") {
   return { id: randomUUID(), target, learn_date: "2026-11-15", meaning: "a detailed examination", part_of_speech: "noun", source_example: "Example from the source.", source_url: "https://ieltstutors.org/academic-word-list/", context: "", word_family: "", synonym: "", first_sentence: "  My analysis have mistakes.\n  " };

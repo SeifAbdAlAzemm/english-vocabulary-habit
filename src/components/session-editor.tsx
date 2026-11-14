@@ -5,12 +5,16 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { closeSession, saveWord, syncSession } from "@/app/actions";
 import { AWL_SOURCE, emptyWord, isReviewDay, PARTS_OF_SPEECH, type Session, type WordInput } from "@/lib/model";
+import { ReviewPanel } from "./review-panel";
+import { completePractice, refreshPracticeSession } from "@/app/review-actions";
+import type { ReviewState } from "@/lib/reviews";
 import { activeMilliseconds, formatTime, heartbeat, validIntervals } from "@/lib/stopwatch";
 
 type LocalCopy = { session: Session; savedAt: number };
 
 export function SessionEditor({ initial, savedIds }: { initial: Session; savedIds: string[] }) {
   const router = useRouter();
+  const [reviews, setReviews] = useState<ReviewState | null>(null);
   const [session, setSession] = useState(initial);
   const current = useRef(initial);
   const ownsEditor = useRef(false);
@@ -183,17 +187,46 @@ export function SessionEditor({ initial, savedIds }: { initial: Session; savedId
     } catch { setError("Save could not be confirmed. Your original draft is kept. Retry safely; the same word won’t be inserted twice."); }
     finally { busyRef.current = false; setBusy(false); }
   }
+  async function runReview(operation: (snapshot: Session) => Promise<{ error?: string }>): Promise<boolean> {
+    if (!ownsEditor.current || busyRef.current || recovery || conflict.current) return false;
+    busyRef.current = true; setBusy(true); runningRef.current = false; setRunning(false);
+    clearTimeout(debounce.current); await queue.current;
+    try {
+      const s = current.current;
+      const synced = await syncSession(s.id, s.version, { intervals: s.intervals, draft: s.draft, chosen_words: s.chosen_words, exceptional_learning: s.exceptional_learning });
+      if (synced.error) { setError(synced.error); return false; }
+      persist({ ...current.current, version: synced.version! });
+      const result = await operation(current.current);
+      if (result.error) { setError(result.error); return false; }
+      const fresh = await refreshPracticeSession(s.id);
+      persist({ ...current.current, version: fresh.version }); setError(""); setMessage("Practice saved; timer paused");
+      return true;
+    } catch { setError("Save could not be confirmed. Your local work is kept. Reload to recover the saved first attempt before continuing."); return false; }
+    finally { busyRef.current = false; setBusy(false); }
+  }
+  async function finishPractice() {
+    const ok = await runReview(s => completePractice(s.id, s.version, s.intervals));
+    if (ok) {
+      ownsEditor.current = false;
+      localStorage.removeItem(storageKey); localStorage.removeItem(`${storageKey}:recovery`);
+      router.push("/session?completed=1"); router.refresh();
+    }
+  }
   const word = session.draft;
   const atWordLimit = savedIds.length >= session.chosen_words;
-  const canLearn = (session.session_type === "learning" && !isReviewDay(word.learn_date ?? session.local_date)) || session.exceptional_learning;
-  const input = (field: keyof WordInput, label: string, required = false, multiline = false) => <label key={field}>{label}{!required && <span className="optional">optional</span>}{multiline ? <textarea rows={3} value={word[field] ?? ""} maxLength={5000} required={required} onChange={e => change(field, e.target.value)} /> : <input value={word[field] ?? ""} maxLength={field === "target" ? 100 : 5000} type={field === "learn_date" ? "date" : field === "source_url" ? "url" : "text"} required={required} onChange={e => change(field, e.target.value)} />}</label>;
+  const reviewsCleared = Boolean(reviews && reviews.queue.length === 0 && reviews.attempts.every(a => a.review_feedback.length));
+  const canLearn = (session.session_type === "MVD" && session.mvd_path === "learn") || (session.session_type === "learning" && !isReviewDay(word.learn_date ?? session.local_date)) || session.exceptional_learning;
+  const input = (field: keyof WordInput, label: string, required = false, multiline = false) => <label key={field}>{label}{!required && <span className="optional">optional</span>}{multiline ? <textarea aria-label={label} rows={3} value={word[field] ?? ""} maxLength={5000} required={required} onChange={e => change(field, e.target.value)} /> : <input aria-label={label} value={word[field] ?? ""} maxLength={field === "target" ? 100 : 5000} type={field === "learn_date" ? "date" : field === "source_url" ? "url" : "text"} required={required} onChange={e => change(field, e.target.value)} />}</label>;
   return <>
-    <div className="session-layout"><aside className="session-aside"><section className="card timer-card"><span className="eyebrow">ACTIVE STUDY TIME</span><div className="stopwatch" role="timer" aria-label="Active study time">{formatTime(activeMilliseconds(session.intervals))}</div><span className={`timer-status ${running ? "is-running" : ""}`}><i />{running ? "Focus time" : "Paused"}</span><button className="button secondary" disabled={locked || busy} onClick={running ? pause : resume}>{running ? "Pause stopwatch" : "Resume stopwatch"}</button><p className="fine-print">Pauses, hidden tabs, offline time, and time away after reload are excluded. Recovery always starts paused.</p></section><section className="card"><span className="eyebrow">KEEP THE PLAN SIMPLE</span><h3>Planned: 2 words / learning day</h3><p>Sunday–Thursday. A one-off choice keeps the plan unchanged.</p><label>Words to work on this session<select value={session.chosen_words} disabled={locked || busy} onChange={e => { persist({ ...current.current, chosen_words: Number(e.target.value) }); scheduleSync(); }}>{[1, 2, 3].map(n => <option key={n} value={n} disabled={n < savedIds.length}>{n} {n === 1 ? "word" : "words"}</option>)}</select></label><p className="fine-print">Saved in this draft: {savedIds.length}. Session remains unfinished.</p></section><p className="fine-print" role="status">{message}</p><button className="text-button" disabled={locked || busy} onClick={() => void sync()}>Retry draft sync</button></aside>
+    <div className="session-layout"><aside className="session-aside"><section className="card timer-card"><span className="eyebrow">ACTIVE STUDY TIME</span><div className="stopwatch" role="timer" aria-label="Active study time">{formatTime(activeMilliseconds(session.intervals))}</div><span className={`timer-status ${running ? "is-running" : ""}`}><i />{running ? "Focus time" : "Paused"}</span><button className="button secondary" disabled={locked || busy} onClick={running ? pause : resume}>{running ? "Pause stopwatch" : "Resume stopwatch"}</button><p className="fine-print">Pauses, hidden tabs, offline time, and time away after reload are excluded. Recovery always starts paused.</p></section><section className="card"><span className="eyebrow">{session.session_type === "MVD" ? "MVD - LIGHT DAY" : "KEEP THE PLAN SIMPLE"}</span><h3>Plan: 2 words / learning day</h3><p>Sunday–Thursday. A one-off choice keeps the plan unchanged.</p>
+      {(session.session_type === "learning" || session.exceptional_learning || session.mvd_path === "learn") ? <label>Words to work on this session<select value={session.chosen_words} disabled={locked || busy || session.session_type === "MVD"} onChange={e => { persist({ ...current.current, chosen_words: Number(e.target.value) }); scheduleSync(); }}>{[1, 2, 3].map(n => <option key={n} value={n} disabled={n < savedIds.length}>{n} {n === 1 ? "word" : "words"}</option>)}</select></label> : <p>No new words planned in this {session.session_type === "MVD" ? "MVD" : "review session"}.</p>}
+      <p className="fine-print">Saved in this draft: {savedIds.length}. {session.session_type === "learning" ? "Learning remains unfinished until feedback and quick recall are available." : "Practice completion requires recorded evidence."}</p></section><p className="fine-print" role="status">{message}</p><button className="text-button" disabled={locked || busy} onClick={() => void sync()}>Retry draft sync</button></aside>
     <section className="card word-entry">
       {locked ? <p className="notice" role="status">{message}</p> : <>
         {recovery && <div className="notice"><p>A local draft differs from the cloud copy. Your local copy is kept separately. Restore it only if it is the work you want to continue.</p><button className="text-button" disabled={busy} onClick={() => { persist({ ...current.current, draft: recovery.draft, intervals: recovery.intervals }); setWriting(recovery.draft.stage === "sentence"); setRecovery(null); localStorage.removeItem(`${storageKey}:recovery`); conflict.current = false; scheduleSync(); }}>Restore local work</button><button className="text-button" onClick={() => { localStorage.removeItem(`${storageKey}:recovery`); setRecovery(null); }}>Keep cloud copy</button></div>}
+        <ReviewPanel session={session} disabled={locked || busy || Boolean(recovery)} run={runReview} draft={review => { persist({ ...current.current, draft: { ...current.current.draft, review } }); scheduleSync(); }} onState={setReviews} />
         {atWordLimit && <div className="notice"><strong>Selected word count reached: {savedIds.length}/{session.chosen_words}.</strong><p>Increase the selection up to 3 to add another word, or close this unfinished session. Reaching this count does not complete the approved routine.</p></div>}
-        {!canLearn ? <div className="stack"><span className="eyebrow">REVIEW-ONLY SESSION</span><h2>Today is for retrieval.</h2><p>Review practice is coming soon. This draft is not a completed review or active day.</p><button className="button secondary" disabled={busy} onClick={() => { persist({ ...current.current, exceptional_learning: true }); scheduleSync(); }}>Choose exceptional new-word study</button></div> : <form onSubmit={save}>
+        {session.session_type === "MVD" && session.mvd_path !== "learn" ? null : !reviewsCleared ? <p className="notice">Finish due reviews and check their answers before entering new words.</p> : !canLearn ? <div className="stack"><span className="eyebrow">REVIEW-ONLY SESSION</span><h2>Today is for retrieval.</h2><p>Complete retrieval above, then finish the review session below. No new words are planned today.</p><button className="button secondary" disabled={busy} onClick={() => { persist({ ...current.current, exceptional_learning: true }); scheduleSync(); }}>Choose exceptional new-word study</button></div> : <form onSubmit={save}>
           <fieldset disabled={busy} className="stack"><div className="section-heading"><div><span className="eyebrow">{writing ? "02 / INDEPENDENT PRODUCTION" : "01 / UNDERSTAND YOUR WORD"}</span><h2>{writing ? "Make it your own." : "One word, understood well."}</h2></div><span className="pill neutral">Draft</span></div>
             {!writing ? <>
               <p>Use <a href={AWL_SOURCE} target="_blank" rel="noreferrer">IELTS Tutors’ Academic Word List ↗</a>. Start afresh with <strong>analysis</strong>, then <strong>approach</strong>. Entry is manual; AWL order is not automatically validated.</p>
@@ -215,7 +248,8 @@ export function SessionEditor({ initial, savedIds }: { initial: Session; savedId
       </>}
       {error && <p role="alert" className="error-message">{error}</p>}
     </section></div>
-    <div className="notice slice-note"><strong>This is an unfinished routine.</strong> Saving a word preserves your work; it does not complete a session, MVD, or active-day record. Feedback, due reviews, quick recall, and session completion are coming soon. <Link href="/words" onClick={pause}>Pause & view My Words →</Link></div>
+    <div className="notice slice-note"><strong>{session.session_type === "MVD" ? "MVD practice" : session.session_type === "review" ? "Review-only practice" : "This is an unfinished learning routine."}</strong> {session.session_type === "learning" ? "Feedback and Day 0 quick recall remain for Slice 03; saving words does not complete the full routine." : "Finish only after the required practice and answer checks are recorded. Other unfinished obligations remain due."} <Link href="/words" onClick={pause}>Pause & view My Words</Link></div>
+    {session.session_type !== "learning" && <section className="card section stack"><h3>Finish {session.session_type === "MVD" ? "Minimum Viable Day" : "review session"}</h3><p>Completion is checked against stored activity, with active time excluding pauses. An empty draft never qualifies.</p><button className="button" disabled={locked || busy || Boolean(recovery) || (!reviews?.qualified && !(session.mvd_path === "learn" && savedIds.length > 0))} onClick={() => void finishPractice()}>Finish {session.session_type === "MVD" ? "MVD" : "review session"}</button></section>}
     <section className="card section stack">
       <div><h3>Stop here and keep your work</h3><p>Closing stores your unsaved text and active time in read-only Session history. Saved words stay in My Words. You can then start a fresh session; this one will be marked closed unfinished.</p></div>
       {confirmClose ? <div className="stack"><p className="notice">This session will become read-only and cannot be resumed. It will not be marked completed or counted as a completed routine. Resolve any local recovery choice before closing.</p><div className="flex flex-wrap gap-4"><button className="button secondary" disabled={locked || busy || Boolean(recovery)} onClick={() => void closeUnfinished()}>{busy ? "Closing…" : "Close & keep history"}</button><button className="text-button" disabled={busy} onClick={() => setConfirmClose(false)}>Keep studying</button></div></div> : <button className="text-button self-start" disabled={locked || busy || Boolean(recovery)} onClick={() => { pause(); setConfirmClose(true); }}>Close unfinished session</button>}

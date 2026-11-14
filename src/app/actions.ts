@@ -24,10 +24,10 @@ export async function signOut() {
   redirect("/login");
 }
 
-export async function startSession(date: string, exceptional: boolean) {
+export async function startSession(date: string, exceptional: boolean, mode = "routine", timezone = "UTC") {
   const { supabase } = await requireLearner();
   if (!validDate(date) || typeof exceptional !== "boolean") return { error: "Invalid session date." };
-  const { data, error } = await supabase.rpc("start_study_session", { p_local_date: date, p_exceptional: exceptional });
+  const { data, error } = await supabase.rpc("start_practice_session", { p_mode: mode, p_timezone: timezone, p_exceptional: exceptional });
   if (error) return { error: "Could not start the session. Please retry." };
   revalidatePath("/");
   revalidatePath("/session");

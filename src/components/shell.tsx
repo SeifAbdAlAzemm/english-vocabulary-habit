@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { signOut } from "@/app/actions";
 
-export function Shell({ children, active }: { children: React.ReactNode; active: "home" | "session" | "words" }) {
+export function Shell({ children, active }: { children: React.ReactNode; active: "home" | "session" | "words" | "review" }) {
   return <div className="app-shell">
     <header className="site-header">
       <Link href="/" className="brand"><span className="brand-mark" aria-hidden="true">v<span>h</span></span><span>Vocabulary Habit<small>SMALL PRACTICE. LASTING WORDS.</small></span></Link>
-      <nav aria-label="Main navigation"><Link aria-current={active === "home" ? "page" : undefined} href="/">Dashboard</Link><Link aria-current={active === "words" ? "page" : undefined} href="/words">My Words</Link><span className="nav-soon">Review <small>soon</small></span><span className="nav-soon">Progress <small>soon</small></span></nav>
+      <nav aria-label="Main navigation"><Link aria-current={active === "home" ? "page" : undefined} href="/">Dashboard</Link><Link aria-current={active === "words" ? "page" : undefined} href="/words">My Words</Link><Link aria-current={active === "review" ? "page" : undefined} href="/review">Review</Link><span className="nav-soon">Progress <small>soon</small></span></nav>
       <form action={signOut}><button className="text-button">Sign out</button></form>
     </header>
     <main id="main" className="page-content">{children}</main>

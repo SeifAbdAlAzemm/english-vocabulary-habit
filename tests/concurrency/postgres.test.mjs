@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve, basename } from "node:path";
 import { createServer } from "node:net";
 import pg from "pg";
+import { randomUUID } from "node:crypto";
 import { close, identity, identitySchema, insertWord, learnerA, learnerB, migrationSql, save, session, start, word } from "../helpers/database.mjs";
 
 const execute = promisify(execFile);
@@ -183,4 +184,74 @@ test("real PostgreSQL connections serialize lifecycle and word-limit races", { t
       assert.equal(await count(id), 1);
     });
   }
+
+  async function reviewFixture() {
+    const id = await fresh(1);
+    const w = { ...word(), learn_date: "2000-01-02" };
+    await save(a, id, (await session(a,id)).version, w);
+    await close(a, await session(a,id));
+    const sid = (await a.query("select start_practice_session('review','UTC',false) id")).rows[0].id;
+    return { sid, wid: w.id, due: "2000-01-03", version: (await session(a,sid)).version };
+  }
+  function recall(client, f, id = randomUUID(), result = "forgot") {
+    return client.query("select record_review($1,$2,$3,$4,$5,$6,null,'UTC','[]'::jsonb) id", [id,f.sid,f.version,f.wid,f.due,result]);
+  }
+  await t.test("concurrent first recalls return one immutable result and one next-day remedial", async () => {
+    const f=await reviewFixture(); await a.query("begin");
+    const first=(await recall(a,f)).rows[0].id;
+    const competing=outcome(recall(b,f,randomUUID(),"remembered"));
+    await waitForBlocked(); await a.query("commit");
+    const retried=await competing; assert.ifError(retried.error); assert.equal(retried.result.rows[0].id,first);
+    assert.equal((await a.query("select count(*)::int n from review_attempts")).rows[0].n,1);
+    assert.equal((await a.query("select recall from review_attempts")).rows[0].recall,"forgot");
+    assert.equal((await a.query("select count(*)::int n from review_obligations where kind='remedial'")).rows[0].n,1);
+  });
+  await t.test("review save wins against stale closing without losing the first result", async () => {
+    const f=await reviewFixture(); const snapshot=await session(a,f.sid);
+    await a.query("begin"); await recall(a,f);
+    const competing=outcome(close(b,snapshot)); await waitForBlocked(); await a.query("commit");
+    assert.equal((await competing).error?.code,"40001");
+    assert.equal((await session(a,f.sid)).status,"draft");
+    assert.equal((await a.query("select count(*)::int n from review_attempts")).rows[0].n,1);
+  });
+  await t.test("closing wins against a fresh recall; no evidence can leak into closed history", async () => {
+    const f=await reviewFixture(); await a.query("begin"); await close(a,await session(a,f.sid));
+    const competing=outcome(recall(b,f)); await waitForBlocked(); await a.query("commit");
+    assert.equal((await competing).error?.code,"55000");
+    assert.equal((await a.query("select count(*)::int n from review_attempts")).rows[0].n,0);
+  });
+  await t.test("concurrent Day +7 sentences preserve exactly the first version", async () => {
+    const f={...await reviewFixture(),due:"2000-01-09"};
+    const aid=(await recall(a,f,randomUUID(),"remembered")).rows[0].id;
+    const version=(await session(a,f.sid)).version;
+    const production=(client,text)=>client.query("select finish_review_feedback($1,$2,$3,$4,false,'UTC')",[aid,f.sid,version,text]);
+    await a.query("begin"); await production(a,"  First independent sentence.  ");
+    const competing=outcome(production(b,"Replacement")); await waitForBlocked(); await a.query("commit");
+    assert.equal((await competing).error?.code,"40001");
+    assert.equal((await a.query("select first_sentence from review_productions")).rows[0].first_sentence,"  First independent sentence.  ");
+  });
+  await t.test("final feedback and session completion serialize without awarding unchecked reviews", async () => {
+    const f=await reviewFixture(); const ids=[];
+    const obligations=(await a.query("select id,due_date::text due_date,checkpoint from review_obligations order by due_date")).rows;
+    for(const o of obligations) {
+      const aid=(await a.query("select record_review($1,$2,$3,$4,$5,'remembered',$6,'UTC','[]') id",[randomUUID(),f.sid,(await session(a,f.sid)).version,f.wid,o.due_date,o.checkpoint===7?'My independent sentence.':null])).rows[0].id;
+      ids.push(aid); await a.query("select reveal_review_answer($1)",[aid]);
+    }
+    async function acknowledge(aid) {
+      return a.query("select finish_review_feedback($1,$2,$3,null,true,'UTC')",[aid,f.sid,(await session(a,f.sid)).version]);
+    }
+    await acknowledge(ids[0]);
+    const finish=(client,version)=>client.query("select complete_practice_session($1,$2,'[]')",[f.sid,version]);
+    await assert.rejects(finish(a,(await session(a,f.sid)).version),e=>e.code==='23514');
+    for(const aid of ids.slice(1,-1)) await acknowledge(aid);
+    const staleVersion=(await session(a,f.sid)).version;
+    await a.query("begin"); await acknowledge(ids.at(-1));
+    const competing=outcome(finish(b,staleVersion));
+    await waitForBlocked(); await a.query("commit");
+    assert.equal((await competing).error?.code,"40001");
+    assert.equal((await session(a,f.sid)).status,"draft");
+    await finish(b,(await session(b,f.sid)).version);
+    assert.equal((await session(a,f.sid)).status,"completed");
+    assert.equal((await a.query("select count(*)::int n from review_schedule where completed")).rows[0].n,5);
+  });
 });

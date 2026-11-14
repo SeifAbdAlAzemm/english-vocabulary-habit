@@ -14,12 +14,14 @@ export type WordInput = {
   first_sentence: string;
 };
 export type Interval = { start: number; end: number };
-export type WordDraft = Partial<WordInput> & { stage?: "notes" | "sentence" };
+export type WordDraft = Partial<WordInput> & { stage?: "notes" | "sentence"; review?: { key: string; id: string; sentence: string } };
 export type Session = {
   id: string;
   user_id: string;
   local_date: string;
-  session_type: "learning" | "review";
+  session_type: "learning" | "review" | "MVD";
+  mvd_path: "due" | "extra" | "learn" | null;
+  mvd_targets: string[];
   planned_words: number;
   chosen_words: number;
   exceptional_learning: boolean;

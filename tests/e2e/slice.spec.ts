@@ -1,7 +1,28 @@
 import { test, expect } from "@playwright/test";
+import type { Page } from "@playwright/test";
+
+// Only used by the explicitly configured, dedicated learner scenario below.
+// Review-first now applies to an account that retained older test words.
+async function checkDueReviews(page: Page) {
+  for (let i = 0; i < 150; i++) {
+    await expect(page.getByRole("button", { name: "Refresh review queue", exact: true })).toBeVisible();
+    const firstResult = page.getByRole("button", { name: "Forgot", exact: true });
+    const partial = page.getByRole("button", { name: "Save Day +7 first sentence", exact: true });
+    const reveal = page.getByRole("button", { name: "Reveal saved answer", exact: true });
+    if (!await firstResult.isVisible() && !await partial.isVisible() && !await reveal.isVisible()) return;
+    const sentence = page.getByLabel(/New independent sentence/);
+    if (await sentence.isVisible()) await sentence.fill("This is an independent sentence in a dedicated automated test.");
+    if (await partial.isVisible()) await partial.click();
+    else if (await firstResult.isVisible()) await firstResult.click();
+    await reveal.click();
+    await page.getByRole("button", { name: "I checked the answer and corrected mistakes", exact: true }).click();
+    await expect(reveal).toHaveCount(0);
+  }
+  throw new Error("Dedicated test learner has too many pending review cards for this scenario.");
+}
 
 test("private pages redirect to sign-in; login works on desktop and mobile widths", async ({ page }) => {
-  for (const path of ["/", "/session", "/words"]) {
+  for (const path of ["/", "/session", "/words", "/review"]) {
     await page.goto(path);
     await expect(page).toHaveURL(/\/login$/);
     await expect(page.getByRole("heading", { name: "Welcome back." })).toBeVisible();
@@ -36,6 +57,7 @@ test("live learner can recover, save, close unfinished work, keep history, and s
   if (await freshException.isVisible()) await freshException.check();
   await page.getByRole("button", { name: "Start Your Routine Today →", exact: true }).click();
   const reviewChoice = page.getByRole("button", { name: "Choose exceptional new-word study" });
+  await checkDueReviews(page);
   if (await reviewChoice.isVisible()) await reviewChoice.click();
   await expect(page.getByLabel("Target word", { exact: true })).toBeVisible();
   // This test adds a clearly identifiable fixture to a dedicated account; it remains saved.
